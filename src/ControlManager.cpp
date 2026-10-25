@@ -29,6 +29,18 @@ bool ControlManager::validate() const {
   return valid;
 }
 
+void ControlManager::syncSwitches(const Expander& device) {
+  // Publish current maintained positions at startup and on reconnect.
+  for (size_t i = 0; i < CONTROL_COUNT; ++i) {
+    const auto& c = CONTROL_MAP[i];
+    if (c.address != device.address || c.type != ControlType::SWITCH) continue;
+    bool active = !(device.stable & (1U << c.pin));
+    if (handler_) handler_(c.label, active, false);
+    cmcLink.sendEvent(c.label, active ? "ON" : "OFF");
+    if (eventLogging_) Serial.printf("[SYNC] %s %s\n", c.label, active ? "ON" : "OFF");
+  }
+}
+
 bool ControlManager::probe(Expander& device) {
   Wire.beginTransmission(device.address);
   if (Wire.endTransmission() != 0) return false;
@@ -43,6 +55,8 @@ bool ControlManager::probe(Expander& device) {
   for (auto& t : device.changedAt) t = millis();
   device.online = true;
   Serial.printf("[IO] Connected PCF8574 at 0x%02X\n", device.address);
+  if (availabilityHandler_) availabilityHandler_(device.address, true);
+  syncSwitches(device);
   return true;
 }
 
@@ -100,6 +114,7 @@ void ControlManager::poll(Expander& dev, uint32_t now) {
   uint8_t sample;
   if (!read(dev.address, sample)) {
     dev.online = false;
+    if (availabilityHandler_) availabilityHandler_(dev.address, false);
     dev.lastProbe = now;
     Serial.printf("[IO] Lost 0x%02X; its inputs are now unavailable\n", dev.address);
     return;
@@ -116,6 +131,7 @@ void ControlManager::poll(Expander& dev, uint32_t now) {
         if (c.address != dev.address || c.pin != pin) continue;
         mapped = true;
         bool active = !(dev.stable & mask);
+        if (handler_) handler_(c.label, active, c.type == ControlType::BUTTON);
         // Event routing is deliberately reporting-only in this bench firmware.
         cmcLink.sendEvent(c.label, c.type == ControlType::BUTTON ? (active ? "PRESSED" : "RELEASED") : (active ? "ON" : "OFF"));
         if (eventLogging_)

@@ -4,13 +4,17 @@
 // Change ONLY this table to reassign controls. Each entry: {address, pin, type, label}.
 // Inputs are active-low: pressed/ON = connected to GND.
 // Standard PCF8574 address range: 0x20..0x27.
-// All five input expanders are explicitly registered, even if pins are unmapped.
+// Four input expanders are explicitly registered, even if pins are unmapped.
 // EDIT these addresses to match your I2C SCAN results; 0x20..0x24 are defaults.
-// IMPORTANT: All registered PCF8574 pins are initialized HIGH (input mode).
+// IMPORTANT: Input PCF8574 pins are initialized HIGH; 0x24 is owned by RelayManager.
 // Do not connect output loads to these pins with this input-only firmware.
-constexpr uint8_t EXPANDER_ADDRESSES[] = {0x20, 0x21, 0x22, 0x23, 0x24};
+constexpr uint8_t EXPANDER_ADDRESSES[] = {0x20, 0x21, 0x22, 0x23};
 constexpr size_t EXPANDER_COUNT = sizeof(EXPANDER_ADDRESSES) / sizeof(EXPANDER_ADDRESSES[0]);
 enum class ControlType : uint8_t { SWITCH, BUTTON };
+// MAINTAINED follows the physical ON/OFF position; MOMENTARY reports presses.
+enum class SwitchBehavior : uint8_t { MOMENTARY, MAINTAINED };
+constexpr SwitchBehavior CASE_LIGHT_SWITCH_BEHAVIOR = SwitchBehavior::MAINTAINED;
+constexpr SwitchBehavior PANEL_LIGHT_SWITCH_BEHAVIOR = SwitchBehavior::MAINTAINED;
 struct ControlDefinition {
   uint8_t address;
   uint8_t pin;

@@ -1,3 +1,6 @@
+#include "PMCStateManager.h"
+#include "RelayManager.h"
+#include "EventBus.h"
 #include "CMCLink.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -50,7 +53,10 @@ void printHelp() {
   Serial.println("HEARTBEAT ON | HEARTBEAT OFF");
   Serial.println("PAL AUTH | PAL LOCK | PAL FAULT | PAL RESET");
   Serial.println("AUTO START | AUTO PAUSE | AUTO STOP");
-  Serial.println("PAL and AUTO commands are simulations; no hardware outputs.");
+  Serial.println("POWER ON | POWER SHUTDOWN | POWER SIM BOOTED | POWER SIM HALTED | POWER RESET FAULT");
+  Serial.println("STATE | RELAYS | RELAY STATUS | RELAY CONFIG | RELAY TEST R1..R8 ON/OFF");
+  Serial.println("IO5 relay driver; only R2/R3 permitted ON when hardware enabled.");
+  Serial.println("BUS STATUS | BUS HISTORY | RELAY ALL OFF");
 }
 void printStatus() {
   Serial.printf("[PMC] ONLINE | uptime=%lu s | heartbeats=%lu | heartbeat log=%s | event log=%s\n",
@@ -66,7 +72,10 @@ void printStatus() {
   Serial.printf("[AUTO] %s\n", autoName());
   controls.printHealth();
   cmcLink.printStatus();
-  Serial.println("[PMC] ALL PHYSICAL OUTPUTS DISABLED");
+  pmcState.print();
+  relays.print();
+  eventBus.printStats();
+  Serial.printf("[PMC] Relay physical outputs=%s\n",RELAY_HARDWARE_OUTPUTS_ENABLED?"ENABLED":"DISABLED");
 }
 void processCommand(String command) {
   command.trim();
@@ -76,6 +85,19 @@ void processCommand(String command) {
   else if (command == "STATUS") printStatus();
   else if (command == "PING") Serial.println("[PMC] PONG");
   else if (command == "CMC STATUS") cmcLink.printStatus();
+  else if (command == "STATE") pmcState.print();
+  else if (command == "RELAYS" || command == "RELAY STATUS") relays.print();
+  else if (command == "RELAY CONFIG") relays.printConfig();
+  else if (command == "RELAY ALL OFF") relays.allOff("manual all off");
+  else if (command == "BUS STATUS") eventBus.printStats();
+  else if (command == "BUS HISTORY") eventBus.printHistory();
+  else if (command.startsWith("POWER ")) pmcState.command(command);
+  else if (command.startsWith("RELAY TEST R")) {
+    int channel=0; char state[8]={};
+    if(sscanf(command.c_str(),"RELAY TEST R%d %7s",&channel,state)==2 && channel>=1 && channel<=8 && (strcmp(state,"ON")==0 || strcmp(state,"OFF")==0))
+      relays.request(static_cast<uint8_t>(channel),strcmp(state,"ON")==0,"manual relay test");
+    else Serial.println("[RELAY] Usage: RELAY TEST R1 ON (R1..R8)");
+  }
   else if (command == "MAP") controls.printMap();
   else if (command == "INPUTS") controls.printInputs();
   else if (command == "I2C SCAN") scanI2C();
@@ -119,15 +141,37 @@ void setup() {
   delay(600);
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   Wire.setClock(100000);
-  Serial.println("\nPMC v0.6 | PCF8574 Control Manager | BENCH MODE");
+  Serial.println("\nPMC v1.0.2 | Maintained Lighting Switches + Event Bus");
+  relays.begin();
+  pmcState.begin();
+  eventBus.subscribe([](const PMCEvent& e){
+    if(e.type==EventType::INPUT_CHANGED) {
+      const bool isButton=(strncmp(e.detail,"BTN",3)==0);
+      pmcState.onControl(e.detail,e.active,isButton);
+    }
+  });
+  eventBus.subscribe([](const PMCEvent& e){
+    if(e.type!=EventType::INPUT_CHANGED)
+      Serial.printf("[BUS] %s ch=%u active=%u %s\n",eventTypeName(e.type),e.channel,e.active,e.detail);
+  });
+  controls.setEventHandler([](const char* label,bool active,bool isButton){
+    (void)isButton; eventBus.publish(EventType::INPUT_CHANGED,0,active,label);
+  });
+  controls.setAvailabilityHandler([](uint8_t address, bool available){
+    pmcState.onInputAvailability(address, available);
+  });
   cmcLink.begin();
   controls.begin();
-  Serial.println("Type HELP. No physical outputs are enabled.");
+  Serial.println("Type HELP. See RelayConfig.h for physical-output gating.");
   lastHeartbeat = millis();
 }
 void loop() {
   updateSerial();
   controls.update();
+  eventBus.dispatch();
+  relays.update();
+  pmcState.update();
+  eventBus.dispatch();
   cmcLink.update();
   uint32_t now = millis();
   if (now - lastHeartbeat >= HEARTBEAT_MS) {

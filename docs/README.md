@@ -15,3 +15,5 @@ This directory captures the current **design**, the **implemented firmware**, an
 - [10 — Testing and Roadmap](10-testing-roadmap.md)
 
 **Status vocabulary:** IMPLEMENTED = present in the included firmware; PROPOSED = architecture/design only; TBD = not yet finalized.
+
+- [11 — PMC State and Relay Managers](11-pmc-state-relays.md)
